@@ -1,0 +1,87 @@
+#version 460 core
+layout(local_size_x = 64) in;
+
+struct ChunkMetadata {
+    int X, Y, Z;
+    uint instanceCount; // Кол-во квадов
+    uint first;         // Смещение
+    uint number;
+    int pad1, pad2;
+};
+
+// Структура команды для glMultiDrawArraysIndirect
+struct DrawCommand {
+    uint count;         // Всегда 4
+    uint instanceCount; // Кол-во квадов в этом чанке
+    uint first;         // 0 (вершины генерируются из SSBO)
+    uint baseInstance;  // Индекс чанка (чтобы VS знал смещение)
+};
+
+layout(std430, binding = 0) readonly restrict buffer Chunks { ChunkMetadata chunks[]; };
+layout(std430, binding = 3) writeonly restrict buffer OutCmds { DrawCommand commands[]; };
+layout(std430, binding = 4) restrict buffer Counter { uint drawCount; };
+
+uniform mat4 viewProj;
+uniform vec3 camPos;
+uniform uint totalChunks;
+
+// ... (Сюда вставьте функции getPlane и isAABBVisible) ...
+vec4 getPlane(int row, float sign) {
+    vec4 p;
+    p.x = viewProj[0][3] + sign * viewProj[0][row];
+    p.y = viewProj[1][3] + sign * viewProj[1][row];
+    p.z = viewProj[2][3] + sign * viewProj[2][row];
+    p.w = viewProj[3][3] + sign * viewProj[3][row];
+    return p / length(p.xyz);
+}
+
+bool isAABBVisible(vec3 minPos, vec3 maxPos) {
+    const int rows[6] = int[](0, 0, 1, 1, 2, 2);
+    const float signs[6] = float[](1.0, -1.0, 1.0, -1.0, 1.0, -1.0);
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane = getPlane(rows[i], signs[i]);
+        vec3 p = minPos;
+        if (plane.x >= 0) p.x = maxPos.x;
+        if (plane.y >= 0) p.y = maxPos.y;
+        if (plane.z >= 0) p.z = maxPos.z;
+        if (dot(plane.xyz, p) + plane.w < 0.0) return false;
+    }
+    return true;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= totalChunks) return;
+
+    ChunkMetadata chunk = chunks[idx];
+
+    // Пустой чанк пропускаем
+    if (chunk.instanceCount == 0) return;
+
+    // Culling
+    vec3 worldMin = vec3(chunk.X, chunk.Y, chunk.Z) * 32.0;
+    vec3 worldMax = worldMin + 32.0;
+    // Relative to camera check
+    vec3 relMin = worldMin - camPos - 1.0;
+    vec3 relMax = worldMax - camPos + 1.0;
+
+    if (isAABBVisible(relMin, relMax)) {
+        // Чанк виден!
+
+        // 1. Получаем уникальный слот в очереди команд
+        uint cmdIdx = atomicAdd(drawCount, 1);
+
+        // 2. Формируем команду
+        DrawCommand cmd;
+        cmd.count = 4; // Квады
+        cmd.instanceCount = chunk.instanceCount;
+        cmd.first = 0;
+
+        // ВАЖНО: baseInstance = idx (индекс чанка в массиве метаданных)
+        // Vertex Shader использует gl_BaseInstance чтобы прочитать chunks[gl_BaseInstance]
+        cmd.baseInstance = idx;
+
+        // 3. Пишем команду
+        commands[cmdIdx] = cmd;
+    }
+}
