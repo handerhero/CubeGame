@@ -1,2 +1,0 @@
-FastNoise2-master
-glad(OpenGL4.6)
