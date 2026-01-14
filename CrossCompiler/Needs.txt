@@ -1,1 +1,0 @@
-llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64
