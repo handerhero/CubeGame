@@ -7,9 +7,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
-# !!! УДАЛЕНО: Блок с libc++.
-# Используем дефолтный libstdc++, чтобы не было конфликтов ABI с системой и драйвером.
-
 # --- 2. Логика OS ---
 if (WIN32)
         message(STATUS "Configuring for Windows (Cross-Compile)")
@@ -21,59 +18,82 @@ else()
         find_package(OpenGL REQUIRED)
         set(OPENGL_LIB OpenGL::GL)
 
-        # LLD - оставляем для скорости сборки
+        # LLD - скорость
         add_link_options("-fuse-ld=lld")
 
-        # Mimalloc - оставляем, он дает буст
+        # Mimalloc - скорость
         set(USE_MIMALLOC ON)
 endif()
 
-# --- 3. Загрузка зависимостей ---
+# --- 3. Загрузка зависимостей (FetchContent) ---
 include(FetchContent)
 
-# GLFW (Строго под X11 для скорости)
+# === GLFW ===
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)     # X11 On
-set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE) # Wayland Off
+# Строго X11 для Linux
+if(UNIX AND NOT WIN32)
+        set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+endif()
 FetchContent_Declare(glfw GIT_REPOSITORY https://github.com/glfw/glfw.git GIT_TAG 3.4)
 FetchContent_MakeAvailable(glfw)
 
-# GLM, XSIMD
+# === GLM ===
 set(GLM_TEST_ENABLE OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(glm GIT_REPOSITORY https://github.com/g-truc/glm.git GIT_TAG 1.0.1)
 FetchContent_MakeAvailable(glm)
 
+# === XSIMD ===
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(xsimd GIT_REPOSITORY https://github.com/xtensor-stack/xsimd.git GIT_TAG 13.0.0)
 FetchContent_MakeAvailable(xsimd)
 
-# MIMALLOC (Исправленная конфигурация)
+# === MIMALLOC (Только Linux) ===
 if(USE_MIMALLOC)
         set(MIMALLOC_INTEL_ATOMIC ON CACHE BOOL "" FORCE)
         set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
         set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        # Отключаем авто-перехват в CMake, сделаем это хедером в коде
         set(MI_OVERRIDE OFF CACHE BOOL "" FORCE)
 
         FetchContent_Declare(mimalloc GIT_REPOSITORY https://github.com/microsoft/mimalloc GIT_TAG v2.1.2)
         FetchContent_MakeAvailable(mimalloc)
 endif()
 
-# FastNoise2 & GLAD
+# === STB IMAGE (НОВОЕ: Исправление ошибки линковки) ===
+FetchContent_Declare(stb GIT_REPOSITORY https://github.com/nothings/stb.git GIT_TAG master)
+FetchContent_MakeAvailable(stb)
+
+# Создаем библиотеку для компиляции реализации stb_image
+# Генерируем файл .c, который включает заголовок с дефайном
+set(STB_IMPL_FILE "${CMAKE_BINARY_DIR}/stb_image_impl.c")
+if(NOT EXISTS "${STB_IMPL_FILE}")
+        file(WRITE "${STB_IMPL_FILE}" "#define STB_IMAGE_IMPLEMENTATION\n#include \"stb_image.h\"\n")
+endif()
+
+add_library(stb_lib STATIC "${STB_IMPL_FILE}")
+target_include_directories(stb_lib PUBLIC "${stb_SOURCE_DIR}")
+# =======================================================
+
+# === FASTNOISE 2 ===
 cmake_policy(SET CMP0048 NEW)
 set(FASTNOISE2_NOISETOOL OFF CACHE BOOL "" FORCE)
 set(FASTNOISE2_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(Libs/FastNoise2-master)
+FetchContent_Declare(fastnoise2 GIT_REPOSITORY https://github.com/Auburn/FastNoise2.git GIT_TAG v0.10.0-alpha)
+FetchContent_MakeAvailable(fastnoise2)
 
-add_library(glad STATIC Libs/glad/src/glad.c Libs/glad/src/stb.cpp)
-target_include_directories(glad PUBLIC Libs/glad/include Definitions/Libs)
+# === GLAD ===
+FetchContent_Declare(glad GIT_REPOSITORY https://github.com/Dav1dde/glad.git GIT_TAG v0.1.36)
+set(GLAD_PROFILE "core" CACHE STRING "OpenGL profile" FORCE)
+set(GLAD_API "gl=4.6" CACHE STRING "OpenGL API version" FORCE)
+set(GLAD_GENERATOR "c" CACHE STRING "Language generator" FORCE)
+set(GLAD_SPEC "gl" CACHE STRING "Specification" FORCE)
+FetchContent_MakeAvailable(glad)
 
 # --- 4. Исполняемый файл ---
 add_executable(cubeRebuild main.cpp
-        # ... ВАШИ ФАЙЛЫ ...
         Source/IOReactions/Mouse.cpp
         Source/Render/GpuManager.cpp
         Source/Debug/GLDebug.cpp
@@ -94,7 +114,6 @@ add_executable(cubeRebuild main.cpp
 
 target_sources(cubeRebuild PUBLIC
         FILE_SET CXX_MODULES FILES
-        # ... ВАШИ МОДУЛИ ...
         Definitions/Core/Chunk.cppm
         Definitions/Core/ChunkAllocator.cppm
         Definitions/RenderEngine/Camera.cppm
@@ -123,7 +142,6 @@ target_sources(cubeRebuild PUBLIC
 target_include_directories(cubeRebuild PRIVATE Definitions Definitions/)
 
 # --- 5. Флаги и Оптимизация ---
-# Вернули стандартные флаги. -march=native обязателен.
 set(RELEASE_FLAGS -O3 -funroll-loops -ftree-vectorize -march=native -ffast-math -flto -fno-plt -Wno-nan-infinity-disabled)
 
 target_compile_options(cubeRebuild PRIVATE $<$<CONFIG:Release>:${RELEASE_FLAGS}>)
@@ -131,10 +149,6 @@ target_link_options(cubeRebuild PRIVATE $<$<CONFIG:Release>:-flto -O3 -fno-plt>)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_options(cubeRebuild PRIVATE -O1 -g -fno-omit-frame-pointer)
-        if (UNIX AND NOT WIN32)
-                target_compile_options(cubeRebuild PRIVATE -fsanitize=address,undefined)
-                target_link_options(cubeRebuild PRIVATE -fsanitize=address,undefined)
-        endif()
 endif()
 
 # --- 6. Линковка ---
@@ -145,17 +159,15 @@ target_link_libraries(cubeRebuild PRIVATE
         xsimd
         glad
         FastNoise
+        stb_lib     # <-- Добавили нашу новую библиотеку для картинок
 )
 
 if(USE_MIMALLOC)
-        # Линкуем статическую библиотеку.
         target_link_libraries(cubeRebuild PRIVATE mimalloc-static)
-        # Добавляем путь к хедерам (чтобы в main.cpp работал include)
         target_include_directories(cubeRebuild PRIVATE ${mimalloc_SOURCE_DIR}/include)
 endif()
 
 if(UNIX AND NOT WIN32)
-        # Обязательно pthread и dl для Linux
         target_link_libraries(cubeRebuild PRIVATE pthread dl)
 endif()
 
