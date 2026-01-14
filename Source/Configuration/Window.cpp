@@ -1,10 +1,12 @@
-//
-// Created by aspadien on 06.01.2026.
-//
-#include "../../Headers/Render/Window.hpp"
+module;
+#include "glad/glad.h"
 #include <stdexcept> // Для std::runtime_error
-#include <iostream>
+#include "GLFW/glfw3.h"
 
+
+import Camera;
+
+module Window;
 // ==========================================
 // КОНСТРУКТОР (Теперь чистый и понятный)
 // ==========================================
@@ -30,6 +32,7 @@ Window::Window(Camera& camera, const char* windowName) {
 
     // 7. Настраиваем глобальные параметры рендера
     configureOpenGLState();
+
 }
 
 // ==========================================
@@ -66,6 +69,23 @@ void Window::configureWindowHints() {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);     // Окно поверх всех
     glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE); // Не сворачивать при потере фокуса (для fullscreen)
+    // Перед glfwCreateWindow:
+
+    // 1. Говорим системе: "Мне не нужна прозрачность, я рисую всё сам"
+    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_FALSE);
+
+    // 2. Отключаем альфа-канал в буфере кадра (это триггер для Direct Scanout)
+    glfwWindowHint(GLFW_ALPHA_BITS, 0);
+
+    // 3. Уточняем глубину цвета (иногда дефолт GLFW отличается от Wine)
+    glfwWindowHint(GLFW_RED_BITS, 8);
+    glfwWindowHint(GLFW_GREEN_BITS, 8);
+    glfwWindowHint(GLFW_BLUE_BITS, 8);
+    glfwWindowHint(GLFW_DEPTH_BITS, 24);
+    glfwWindowHint(GLFW_STENCIL_BITS, 0); // Если не используете стенсил
+    // Перед glfwCreateWindow:
+    // Wine не включает debug context по умолчанию. А вы, возможно, включаете.
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_FALSE);
 }
 
 void Window::createWindowObject(const char* title) {
@@ -74,7 +94,7 @@ void Window::createWindowObject(const char* title) {
 
     // Создаем окно на весь размер экрана, но в оконном режиме (nullptr вместо монитора)
     window = glfwCreateWindow(mode->width, mode->height, title, nullptr, nullptr);
-    // = glfwCreateWindow(mode->width, mode->height, title, primary, nullptr);
+    //window = glfwCreateWindow(mode->width, mode->height, title, primary, nullptr);
 
     if (!window) {
         glfwTerminate();

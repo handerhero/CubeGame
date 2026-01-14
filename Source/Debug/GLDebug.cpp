@@ -1,7 +1,9 @@
-#include "Debug/GLDebug.hpp"
+module;
 
 #include <iostream>
 
+#include "glad/glad.h"
+module GLDebug;
 
 void GLAPIENTRY MessageCallback(GLenum source,
                                 GLenum type,

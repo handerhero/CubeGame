@@ -1,7 +1,10 @@
 //
 // Created by aspadien on 07.01.2026.
 //
-#include "Camera/Camera.hpp"
+module;
+#include "glm/gtc/quaternion.hpp"
+#include "glm/vec3.hpp"
+module Camera;
 
 Camera::Camera() {
     camera = new CameraNormal;

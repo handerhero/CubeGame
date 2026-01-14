@@ -1,27 +1,26 @@
-//
-// Created by aspadien on 08.01.2026.
-//
+module;
+
 #define GLM_ENABLE_EXPERIMENTAL
 #include "glm/gtx/extended_min_max.hpp"
-#include "ObjectsAndPhysic/AABB.h"
+import AABB;
 
-AABB::AABB(glm::vec3 center, const float size) {
-    this->min.x = center.x - size/2;
-    this->max.x = center.x + size/2;
-    this->min.y = center.y - size/2;
-    this->max.y = center.y + size/2;
-    this->min.z = center.z - size/2;
-    this->max.z = center.z + size/2;
-    this->center = center;
+module AABB;
+
+  AABB::AABB(glm::vec3 center, const float size) {
+    min.x = center.x - size/2;
+    max.x = center.x + size/2;
+    min.y = center.y - size/2;
+    max.y = center.y + size/2;
+    min.z = center.z - size/2;
+    max.z = center.z + size/2;
 }
-AABB::AABB(glm::vec3 center, float height, float width, float length) {
-    this->min.x = center.x - width/2;
-    this->max.x = center.x + width/2;
-    this->min.y = center.y - height/2;
-    this->max.y = center.y + height/2;
-    this->min.z = center.z - length/2;
-    this->max.z = center.z + length/2;
-    this->center = center;
+   AABB::AABB(glm::vec3 center, float height, float width, float length) {
+    min.x = center.x - width/2;
+    max.x = center.x + width/2;
+    min.y = center.y - height/2;
+    max.y = center.y + height/2;
+    min.z = center.z - length/2;
+    max.z = center.z + length/2;
 }
 
 // Трансформация AABB через матрицу модели
@@ -42,12 +41,12 @@ AABB::AABB(glm::vec3 center, float height, float width, float length) {
     return result;
 }
 
-AABB AABB::getBlockAABB(float center, const float scale) {
+ AABB AABB::getBlockAABB(float center, const float scale) {
     const AABB aabb(glm::vec3(center),scale);
     return aabb;
 }
 
 
 glm::vec3 AABB::getCenter() const {
-    return (this->min + this->max) * 0.5f;
+    return (min + max) * 0.5f;
 }

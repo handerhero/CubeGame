@@ -1,9 +1,12 @@
-// --- START OF FILE main.cpp ---
-
+#if defined(__linux__)
+#include <mimalloc-new-delete.h>
+#endif
 #define GLFW_INCLUDE_NONE
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define GLM_ENABLE_EXPERIMENTAL
 
+
+#include <algorithm>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -13,22 +16,25 @@
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
 #include <glm/gtx/norm.hpp>
-
-// Ваши заголовки
 #include <GL/glext.h>
+#include "stb_image.h"
+#include "Definitions/Core/Config.h"
 
-#include "Camera/Camera.hpp"
-#include "ChunkSystem/ChunkGenerationManager.h"
-#include "Debug/FPSCounter.hpp"
-#include "Debug/GLDebug.hpp"
-#include "IOReactions/KeyboardControl.h"
-#include "IOReactions/MouseInteractions.h"
-#include "Render/ChunksGpuManager.hpp"
-#include "Render/GPUDrivenRenderTools.h"
-#include "Render/ShaderCreate.h"
-#include "ObjectsAndPhysic/AABB.h"
-#include "ObjectsAndPhysic/Physic.hpp"
-#include "Render/Window.hpp"
+
+import Physic;
+import Camera;
+import ChunkGenerationSystem;
+import Keyboard;
+import AABB;
+import Callbacks;
+import GLDebug;
+import FPSCounter;
+import Window;
+import CreateShader;
+import GpuManager;
+import Chunk;
+import VramAllocator;
+import Frustum;
 
 // Структура задачи загрузки (локальная для Main Thread)
 struct UploadTask {
@@ -112,7 +118,7 @@ class VoxelGame {
 public:
     std::atomic<bool> programIsRunning{true};
     Window* window;
-    KeyboardControl keyboard_control;
+    Keyboard keyboard_control;
     glm::vec3 physicsVector = glm::vec3(0.0f);
     AABB *playerAABB;
     bool onGround = false;
@@ -150,7 +156,7 @@ public:
         LoadShaders();
         LoadTextures();
 
-        gpuManager = std::make_unique<ChunkGpuManager>(renderDistanceXZ+3,(renderHeightY+2)*2);
+        gpuManager = std::make_unique<GpuManager>(renderDistanceXZ+3,(renderHeightY+2)*2);
 
         // Запуск потоков
         int workers = std::max(1u, std::thread::hardware_concurrency() - 2); // Оставим пару ядер системе
@@ -194,12 +200,13 @@ public:
     }
 
 private:
+    Frustum frustum;
     std::vector<std::shared_ptr<Chunk>> chunksToMeshQueue;
     Camera camera;
     ChunkMap loadedChunks;
     Physic *physic_;
     PriorityThreadPool threadPool;
-    std::unique_ptr<ChunkGpuManager> gpuManager;
+    std::unique_ptr<GpuManager> gpuManager;
 
     GLuint renderProgram = 0;
     GLuint computeProgram = 0;
@@ -353,12 +360,12 @@ private:
         if (chunksToMeshQueue.empty()) return;
 
         glm::vec3 pPos = camera.pos;
-        std::sort(chunksToMeshQueue.begin(), chunksToMeshQueue.end(),
-            [pPos](const std::shared_ptr<Chunk>& a, const std::shared_ptr<Chunk>& b) {
-                float distA = glm::distance2(glm::vec3(a->worldPosition * 32 + 16), pPos);
-                float distB = glm::distance2(glm::vec3(b->worldPosition * 32 + 16), pPos);
-                return distA < distB;
-            }
+        std::ranges::sort(chunksToMeshQueue.begin(), chunksToMeshQueue.end(),
+                          [pPos](const std::shared_ptr<Chunk>& a, const std::shared_ptr<Chunk>& b) {
+                              float distA = glm::distance2(glm::vec3(a->worldPosition * 32 + 16), pPos);
+                              float distB = glm::distance2(glm::vec3(b->worldPosition * 32 + 16), pPos);
+                              return distA < distB;
+                          }
         );
 
         for(auto& chunk : chunksToMeshQueue) {
@@ -431,6 +438,8 @@ private:
         glm::ivec3 playerChunkPos = glm::floor(camera.pos / 32.0f);
 
 
+
+
         // ==========================================
         // ЭТАП 1: ГЕНЕРАЦИЯ КОМАНД (Compute Shader)
         // ==========================================
@@ -441,9 +450,14 @@ private:
         // nullptr в конце означает "заполни нулями".
         glClearNamedBufferData(gpuManager->parameterBuffer, GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
 
+        CalculateFrustum(projection,view,frustum.planes);
+        NormalizePlane(*frustum.planes);
+
+
         // 2. Compute Shader
         glUseProgram(computeProgram);
 
+        glUniform4fv(glGetUniformLocation(computeProgram, "frustumPlanes"), 6, &frustum.planes[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(computeProgram, "viewProj"), 1, GL_FALSE, glm::value_ptr(viewProj));
         glUniform3f(glGetUniformLocation(computeProgram, "camPos"), camera.pos.x, camera.pos.y, camera.pos.z);
         glUniform1ui(glGetUniformLocation(computeProgram, "totalChunks"), gpuManager->maxChunksCapacity);
@@ -458,6 +472,9 @@ private:
 
         // Запуск: 1 поток на 1 чанк (группы по 64)
         int numGroups = (gpuManager->maxChunksCapacity + 63) / 64;
+
+        glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
+
         glDispatchCompute(numGroups, 1, 1);
 
         // ==========================================
@@ -488,6 +505,8 @@ private:
         glBindBuffer(GL_DRAW_INDIRECT_BUFFER, gpuManager->indirectContext.commandBuffer);
         // Биндим буфер счетчика как PARAMETER буфер
         glBindBuffer(GL_PARAMETER_BUFFER_ARB, gpuManager->parameterBuffer);
+
+        glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
 
         // РИСУЕМ!
         // GPU читает count из parameterBuffer и исполняет команды из commandBuffer
@@ -542,6 +561,7 @@ private:
 int main() {
     VoxelGame game;
     game.Init();
+    glfwSwapInterval(1);
     game.Run();
     return 0;
 }
